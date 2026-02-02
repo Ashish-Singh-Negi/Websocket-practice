@@ -12,6 +12,7 @@ export function startWebsocketServer(server: Server) {
   wss.on("connection", (ws: WebSocket, req) => {
     console.log(chalk.green.bold("Connection Connected"));
 
+    // verify token
     const token = extractToken(req);
     const tokenData = authenticateUser(token!);
     if (!tokenData) {
