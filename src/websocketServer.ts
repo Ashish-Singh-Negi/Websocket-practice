@@ -1,34 +1,47 @@
 import chalk from "chalk";
-import type { Server } from "http";
+import type { IncomingMessage, Server } from "http";
+import { parse as parseUrl } from "url";
 import ws, { WebSocket, WebSocketServer } from "ws";
+
+const connectedClients: Map<string, Set<WebSocket>> = new Map();
 
 export function startWebsocketServer(server: Server) {
   const wss = new WebSocketServer({ server });
 
   // wss connection
-  wss.on("connection", (ws: WebSocket) => {
-    let count = 0;
-    console.log(chalk.green.bold("    Connection Connected"));
+  wss.on("connection", (ws: WebSocket, req) => {
+    console.log(chalk.green.bold("Connection Connected"));
 
-    ws.on("open", () => {
-      console.log("Connection open event hitted! ");
-    });
+    const token = extractToken(req);
+    const tokenData = authenticateUser(token!);
+    if (!tokenData) {
+      ws.close(4001, "Unauthenticated user");
+      return;
+    }
 
-    // start timer
-    let clearId = startCounter(ws, count);
+    // create a fake/dummy user
+    connectedClients.set(`${tokenData.userId}`, new Set());
+    connectedClients.get(`${tokenData.userId}`)?.add(ws);
 
-    ws.on("message", (rawData, isBinary) => {
-      // converting Binary data to utf-8 string
+    console.log(chalk.bgCyan.bold("User  ", JSON.stringify(tokenData)));
+
+    // listen message
+    ws.on("message", async (rawData) => {
       const data = parseRawData(rawData);
 
-      if (data.trim() === "Stop") clearInterval(clearId);
-      else if (data.trim() === "Start") clearId = startCounter(ws, count);
+      console.log(new Date(), " ", data);
 
-      console.log("Incoming Data : ", data);
+      // broadcast incoming message to all OPEN ws clinets
+      wss.clients.forEach((client) => {
+        // check client ws connection OPEN
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(data);
+        }
+      });
     });
 
     ws.on("close", () => {
-      console.log(chalk.red.bold("    Connection Closed"));
+      console.log(chalk.red.bold("Connection Closed"));
     });
   });
 }
@@ -40,8 +53,31 @@ function parseRawData(rawData: ws.RawData) {
   return data;
 }
 
-function startCounter(ws: WebSocket, count: number) {
-  return setInterval(() => {
-    ws.send(`count ${count++}`);
-  }, 2000);
+function authenticateUser(token: string) {
+  try {
+    const decodedToken = Buffer.from(token, "base64").toString();
+    const tokenData = JSON.parse(decodedToken);
+
+    if (!tokenData.userId) {
+      throw new Error("Invalid token structure");
+    }
+
+    return tokenData;
+  } catch (error) {
+    console.error("Authentication error:", error);
+    return null;
+  }
 }
+
+function extractToken(req: IncomingMessage) {
+  const url = parseUrl(req.url!, true);
+  const token = url.query.token;
+
+  return token as string;
+}
+
+// function startCounter(ws: WebSocket, count: number) {
+//   return setInterval(() => {
+//     ws.send(`count ${count++}`);
+//   }, 2000);
+// }
