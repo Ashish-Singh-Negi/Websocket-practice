@@ -3,7 +3,7 @@ import type { IncomingMessage, Server } from "http";
 import { parse as parseUrl } from "url";
 import ws, { WebSocket, WebSocketServer } from "ws";
 
-const connectedClients: Map<string, Set<WebSocket>> = new Map();
+const connectedClients: Map<string, WebSocket> = new Map();
 
 export function startWebsocketServer(server: Server) {
   const wss = new WebSocketServer({ server });
@@ -20,25 +20,24 @@ export function startWebsocketServer(server: Server) {
       return;
     }
 
-    // create a fake/dummy user
-    connectedClients.set(`${tokenData.userId}`, new Set());
-    connectedClients.get(`${tokenData.userId}`)?.add(ws);
-
-    console.log(chalk.bgCyan.bold("User  ", JSON.stringify(tokenData)));
+    // set new userId with corresponding ws to track connected client/users
+    connectedClients.set(`${tokenData.userId}`, ws);
 
     // listen message
     ws.on("message", async (rawData) => {
       const data = parseRawData(rawData);
-
       console.log(new Date(), " ", data);
 
-      // broadcast incoming message to all OPEN ws clinets
-      wss.clients.forEach((client) => {
-        // check client ws connection OPEN
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(data);
+      const splitedData = data.split("-");
+
+      // send message to specific user id
+      if (data.startsWith("SEND-TO") && connectedClients.has(splitedData[2]!)) {
+        const client = connectedClients.get(splitedData[2]!);
+
+        if (client?.readyState === client?.OPEN) {
+          client?.send(`${splitedData[3]}`);
         }
-      });
+      }
     });
 
     ws.on("close", () => {
