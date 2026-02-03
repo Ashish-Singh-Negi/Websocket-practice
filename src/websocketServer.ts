@@ -47,7 +47,7 @@ export function startWebsocketServer(server: Server) {
     ws.on("close", () => {
       console.log(chalk.red.bold("Connection Closed"));
       console.log("user id : ", tokenData.userId);
-      connectedClients.delete(tokenData.userId.toString());
+      connectedClients.delete(tokenData.user);
     });
   });
 }
@@ -69,6 +69,10 @@ function handleIncomingMessage(
 
     case "MESSAGE":
       broadcastMessageInChatRoom(ws, message, tokenData);
+      break;
+
+    case "LEAVE":
+      leaveChatRoom(ws, message, tokenData);
       break;
 
     default:
@@ -116,10 +120,30 @@ function broadcastMessageInChatRoom(
     return;
   }
 
-  // broadcast message to all connected clients
+  // broadcast message to all clients joined to room
   chatRoom.forEach((client) => {
     if (client.readyState === client.OPEN) {
       sendMessage(client, message.payload.content, ` by ${tokenData.user}`);
+    }
+  });
+}
+
+function leaveChatRoom(
+  ws: WebSocket,
+  message: Message,
+  tokenData: { user: string },
+) {
+  const roomId = message.payload.roomId;
+
+  const clients = chatRooms.get(roomId);
+
+  // leave chat room
+  clients?.delete(ws);
+
+  // broadcast leave message to all existing client in chat room
+  clients?.forEach((client) => {
+    if (client.readyState === client.OPEN) {
+      sendMessage(client, `Room left`, ` by ${tokenData.user}`);
     }
   });
 }
