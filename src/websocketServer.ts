@@ -1,9 +1,18 @@
 import chalk from "chalk";
+import { randomUUID } from "crypto";
 import type { IncomingMessage, Server } from "http";
 import { parse as parseUrl } from "url";
 import ws, { WebSocket, WebSocketServer } from "ws";
 
 const connectedClients: Map<string, WebSocket> = new Map();
+const chatRooms: Map<string, Set<WebSocket>> = new Map();
+
+type MessageType = "CREATE" | "JOIN" | "LEAVE" | "MESSAGE" | "TYPING";
+interface Message {
+  type: MessageType;
+  payload: any;
+  timestamp: Date;
+}
 
 export function startWebsocketServer(server: Server) {
   const wss = new WebSocketServer({ server });
@@ -20,45 +29,119 @@ export function startWebsocketServer(server: Server) {
       return;
     }
 
+    // send tokenData back to user
+    sendMessage(ws, `${tokenData.user}`);
+
     // set new userId with corresponding ws to track connected client/users
-    connectedClients.set(`${tokenData.userId}`, ws);
+    if (!connectedClients.has(tokenData.user)) {
+      connectedClients.set(`${tokenData.user}`, ws);
+    }
 
     // listen message
     ws.on("message", async (rawData) => {
       const data = parseRawData(rawData);
-      console.log(new Date(), " ", data);
 
-      const splitedData = data.split("-");
-
-      // send message to specific user id
-      if (data.startsWith("SEND-TO") && connectedClients.has(splitedData[2]!)) {
-        const client = connectedClients.get(splitedData[2]!);
-
-        if (client?.readyState === client?.OPEN) {
-          client?.send(`${splitedData[3]}`);
-        }
-      }
+      handleIncomingMessage(ws, data, tokenData);
     });
 
     ws.on("close", () => {
       console.log(chalk.red.bold("Connection Closed"));
+      console.log("user id : ", tokenData.userId);
+      connectedClients.delete(tokenData.userId.toString());
     });
   });
 }
 
-function parseRawData(rawData: ws.RawData) {
-  const parsedData = JSON.parse(JSON.stringify(rawData));
-  const data = Buffer.from(parsedData.data).toString();
+function handleIncomingMessage(
+  ws: WebSocket,
+  data: string,
+  tokenData: { user: string },
+) {
+  const message: Message = JSON.parse(data);
+  switch (message.type as MessageType) {
+    case "CREATE":
+      createChatRoom(ws, tokenData.user);
+      break;
 
-  return data;
+    case "JOIN":
+      joinChatRoom(ws, message);
+      break;
+
+    case "MESSAGE":
+      broadcastMessageInChatRoom(ws, message, tokenData);
+      break;
+
+    default:
+      console.log("Invalid Message type ", message.type);
+      break;
+  }
+}
+
+function createChatRoom(ws: WebSocket, user: string) {
+  const newRoomId = randomUUID();
+  chatRooms.set(newRoomId, new Set([ws]));
+  console.log(
+    "🚀 ~ handleIncomingMessage ~ newRoomId:",
+    newRoomId,
+    chalk.magenta(chatRooms.size),
+  );
+
+  sendMessage(ws, `created room with id ${newRoomId}`, user);
+}
+
+function joinChatRoom(ws: WebSocket, message: Message) {
+  const roomId = message.payload.roomId;
+
+  const chatRoom = chatRooms.get(roomId);
+  if (!chatRoom) {
+    sendMessage(ws, `Room id ${roomId} not exist`);
+    return;
+  }
+
+  chatRoom.add(ws);
+
+  console.log(chalk.bgCyan(chatRoom.size));
+}
+
+function broadcastMessageInChatRoom(
+  ws: WebSocket,
+  message: Message,
+  tokenData: { user: string },
+) {
+  const roomId = message.payload.roomId;
+
+  const chatRoom = chatRooms.get(roomId);
+  if (!chatRoom) {
+    sendMessage(ws, `Room id ${roomId} not exist`);
+    return;
+  }
+
+  // broadcast message to all connected clients
+  chatRoom.forEach((client) => {
+    if (client.readyState === client.OPEN) {
+      sendMessage(client, message.payload.content, ` by ${tokenData.user}`);
+    }
+  });
+}
+
+function sendMessage(ws: WebSocket, message: string, username?: string) {
+  if (ws.readyState === ws.OPEN) {
+    ws.send(`${message} ${username ? username : ""}`);
+  }
+}
+
+function parseRawData(rawData: ws.RawData) {
+  return rawData.toString("utf-8");
 }
 
 function authenticateUser(token: string) {
   try {
     const decodedToken = Buffer.from(token, "base64").toString();
+    console.log("🚀 ~ authenticateUser ~ decodedToken:", decodedToken);
     const tokenData = JSON.parse(decodedToken);
+    console.log("🚀 ~ authenticateUser ~ tokenData:", tokenData);
 
-    if (!tokenData.userId) {
+    if (!tokenData.user) {
       throw new Error("Invalid token structure");
     }
 

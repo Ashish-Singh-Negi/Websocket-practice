@@ -8,6 +8,19 @@ const server = http.createServer(app);
 // start ws server
 startWebsocketServer(server);
 
+// create dummy user
+const user1 = Buffer.from(JSON.stringify({ user: "AppleG" })).toString(
+  "base64",
+);
+const user2 = Buffer.from(JSON.stringify({ user: "MangoG" })).toString(
+  "base64",
+);
+const user3 = Buffer.from(JSON.stringify({ user: "KafalG" })).toString(
+  "base64",
+);
+
+console.log("User 1 ", user1, " User 2 ", user2, " User 3 ", user3);
+
 const PORT = 3000;
 server
   .listen(PORT, () => {
