@@ -18,8 +18,9 @@ const user2 = Buffer.from(JSON.stringify({ user: "MangoG" })).toString(
 const user3 = Buffer.from(JSON.stringify({ user: "KafalG" })).toString(
   "base64",
 );
-
-console.log("User 1 ", user1, " User 2 ", user2, " User 3 ", user3);
+const user4 = Buffer.from(JSON.stringify({ user: "Grapes" })).toString(
+  "base64",
+);
 
 const PORT = 3000;
 server

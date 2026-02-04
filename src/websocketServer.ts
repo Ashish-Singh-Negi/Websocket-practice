@@ -140,6 +140,10 @@ function leaveChatRoom(
   // leave chat room
   clients?.delete(ws);
 
+  if (clients?.size === 0) {
+    chatRooms.delete(roomId);
+  }
+
   // broadcast leave message to all existing client in chat room
   clients?.forEach((client) => {
     if (client.readyState === client.OPEN) {
