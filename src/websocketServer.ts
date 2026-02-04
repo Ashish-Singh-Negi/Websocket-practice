@@ -44,9 +44,21 @@ export function startWebsocketServer(server: Server) {
       handleIncomingMessage(ws, data, tokenData);
     });
 
+    ws.on("error", (error) => {
+      console.log(chalk.red.bold("WebSocket encountered an error: \n "), error);
+    });
+
     ws.on("close", () => {
       console.log(chalk.red.bold("Connection Closed"));
-      console.log("user id : ", tokenData.userId);
+
+      for (let [_, clients] of chatRooms) {
+        clients.delete(ws);
+      }
+
+      for (let [roomId, clients] of chatRooms) {
+        console.log(`${roomId} ${clients.size}`);
+      }
+
       connectedClients.delete(tokenData.user);
     });
   });
@@ -58,6 +70,7 @@ function handleIncomingMessage(
   tokenData: { user: string },
 ) {
   const message: Message = JSON.parse(data);
+
   switch (message.type as MessageType) {
     case "CREATE":
       createChatRoom(ws, tokenData.user);
