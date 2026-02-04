@@ -30,7 +30,7 @@ export function startWebsocketServer(server: Server) {
     }
 
     // send tokenData back to user
-    sendMessage(ws, `${tokenData.user}`);
+    sendToClient(ws, `${tokenData.user}`);
 
     // set new userId with corresponding ws to track connected client/users
     if (!connectedClients.has(tokenData.user)) {
@@ -49,14 +49,11 @@ export function startWebsocketServer(server: Server) {
     });
 
     ws.on("close", () => {
+      console.log("Close ", tokenData.user);
       console.log(chalk.red.bold("Connection Closed"));
 
       for (let [_, clients] of chatRooms) {
         clients.delete(ws);
-      }
-
-      for (let [roomId, clients] of chatRooms) {
-        console.log(`${roomId} ${clients.size}`);
       }
 
       connectedClients.delete(tokenData.user);
@@ -97,13 +94,8 @@ function handleIncomingMessage(
 function createChatRoom(ws: WebSocket, user: string) {
   const newRoomId = randomUUID();
   chatRooms.set(newRoomId, new Set([ws]));
-  console.log(
-    "🚀 ~ handleIncomingMessage ~ newRoomId:",
-    newRoomId,
-    chalk.magenta(chatRooms.size),
-  );
 
-  sendMessage(ws, `created room with id ${newRoomId}`, user);
+  sendToClient(ws, `created room with id ${newRoomId}`, user);
 }
 
 function joinChatRoom(ws: WebSocket, message: Message) {
@@ -111,7 +103,7 @@ function joinChatRoom(ws: WebSocket, message: Message) {
 
   const chatRoom = chatRooms.get(roomId);
   if (!chatRoom) {
-    sendMessage(ws, `Room id ${roomId} not exist`);
+    sendToClient(ws, `Room id ${roomId} not exist`);
     return;
   }
 
@@ -129,14 +121,14 @@ function broadcastMessageInChatRoom(
 
   const chatRoom = chatRooms.get(roomId);
   if (!chatRoom) {
-    sendMessage(ws, `Room id ${roomId} not exist`);
+    sendToClient(ws, `Room id ${roomId} not exist`);
     return;
   }
 
   // broadcast message to all clients joined to room
   chatRoom.forEach((client) => {
     if (client.readyState === client.OPEN) {
-      sendMessage(client, message.payload.content, ` by ${tokenData.user}`);
+      sendToClient(client, message.payload.content, ` by ${tokenData.user}`);
     }
   });
 }
@@ -160,12 +152,12 @@ function leaveChatRoom(
   // broadcast leave message to all existing client in chat room
   clients?.forEach((client) => {
     if (client.readyState === client.OPEN) {
-      sendMessage(client, `Room left`, ` by ${tokenData.user}`);
+      sendToClient(client, `Room left`, ` by ${tokenData.user}`);
     }
   });
 }
 
-function sendMessage(ws: WebSocket, message: string, username?: string) {
+function sendToClient(ws: WebSocket, message: string, username?: string) {
   if (ws.readyState === ws.OPEN) {
     ws.send(`${message} ${username ? username : ""}`);
   }
