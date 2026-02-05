@@ -1,9 +1,9 @@
 import chalk from "chalk";
 import jwt, { type JwtPayload } from "jsonwebtoken";
-import { randomUUID } from "crypto";
 import type { IncomingMessage, Server } from "http";
 import { parse as parseUrl } from "url";
 import ws, { WebSocket, WebSocketServer } from "ws";
+import { prisma } from "./lib/prisma.ts";
 
 const connectedClients: Map<string, WebSocket> = new Map();
 const chatRooms: Map<string, Set<WebSocket>> = new Map();
@@ -24,7 +24,7 @@ export function startWebsocketServer(server: Server) {
   const wss = new WebSocketServer({ server });
 
   // wss connection
-  wss.on("connection", (ws: WebSocket, req) => {
+  wss.on("connection", async (ws: WebSocket, req) => {
     console.log(chalk.green.bold("Connection Connected"));
 
     // verify token
@@ -44,7 +44,7 @@ export function startWebsocketServer(server: Server) {
     }
 
     // listen message
-    ws.on("message", async (rawData) => {
+    ws.on("message", (rawData) => {
       const data = parseRawData(rawData);
 
       handleIncomingMessage(ws, data, tokenData);
@@ -67,7 +67,7 @@ export function startWebsocketServer(server: Server) {
   });
 }
 
-function handleIncomingMessage(
+async function handleIncomingMessage(
   ws: WebSocket,
   data: string,
   tokenData: TokenData,
@@ -76,7 +76,7 @@ function handleIncomingMessage(
 
   switch (message.type as MessageType) {
     case "CREATE":
-      createChatRoom(ws, tokenData);
+      await createChatRoom(ws, tokenData);
       break;
 
     case "JOIN":
@@ -97,11 +97,45 @@ function handleIncomingMessage(
   }
 }
 
-function createChatRoom(ws: WebSocket, tokenData: TokenData) {
-  const newRoomId = randomUUID();
-  chatRooms.set(newRoomId, new Set([ws]));
+async function createChatRoom(ws: WebSocket, tokenData: TokenData) {
+  // create new chat room
+  console.log("Token data inside create chat room ", tokenData);
 
-  sendToClient(ws, `created room with id ${newRoomId}`, tokenData.userId);
+  const newChatRoom = await prisma.chat.create({
+    data: {
+      ownerId: tokenData.userId,
+      chatMembers: {
+        create: {
+          userId: tokenData.userId,
+          role: "ADMIN",
+        },
+      },
+    },
+    select: {
+      id: true,
+      createdAt: true,
+      owner: {
+        select: {
+          id: true,
+          username: true,
+        },
+      },
+      chatMembers: {
+        select: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+            },
+          },
+          role: true,
+        },
+      },
+    },
+  });
+
+  chatRooms.set(newChatRoom.id, new Set([ws]));
+  sendToClient(ws, `created room with id ${newChatRoom.id}`, tokenData.userId);
 }
 
 function joinChatRoom(ws: WebSocket, message: Message) {
