@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import jwt, { type JwtPayload } from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import type { IncomingMessage, Server } from "http";
 import { parse as parseUrl } from "url";
@@ -12,6 +13,11 @@ interface Message {
   type: MessageType;
   payload: any;
   timestamp: Date;
+}
+
+interface TokenData {
+  userId: string;
+  username: string;
 }
 
 export function startWebsocketServer(server: Server) {
@@ -30,11 +36,11 @@ export function startWebsocketServer(server: Server) {
     }
 
     // send tokenData back to user
-    sendToClient(ws, `${tokenData.user}`);
+    sendToClient(ws, `${tokenData.username}`);
 
     // set new userId with corresponding ws to track connected client/users
-    if (!connectedClients.has(tokenData.user)) {
-      connectedClients.set(`${tokenData.user}`, ws);
+    if (!connectedClients.has(tokenData.userId)) {
+      connectedClients.set(`${tokenData.userId}`, ws);
     }
 
     // listen message
@@ -49,14 +55,14 @@ export function startWebsocketServer(server: Server) {
     });
 
     ws.on("close", () => {
-      console.log("Close ", tokenData.user);
+      console.log("Close ", tokenData.username);
       console.log(chalk.red.bold("Connection Closed"));
 
       for (let [_, clients] of chatRooms) {
         clients.delete(ws);
       }
 
-      connectedClients.delete(tokenData.user);
+      connectedClients.delete(tokenData.userId);
     });
   });
 }
@@ -64,13 +70,13 @@ export function startWebsocketServer(server: Server) {
 function handleIncomingMessage(
   ws: WebSocket,
   data: string,
-  tokenData: { user: string },
+  tokenData: TokenData,
 ) {
   const message: Message = JSON.parse(data);
 
   switch (message.type as MessageType) {
     case "CREATE":
-      createChatRoom(ws, tokenData.user);
+      createChatRoom(ws, tokenData);
       break;
 
     case "JOIN":
@@ -91,11 +97,11 @@ function handleIncomingMessage(
   }
 }
 
-function createChatRoom(ws: WebSocket, user: string) {
+function createChatRoom(ws: WebSocket, tokenData: TokenData) {
   const newRoomId = randomUUID();
   chatRooms.set(newRoomId, new Set([ws]));
 
-  sendToClient(ws, `created room with id ${newRoomId}`, user);
+  sendToClient(ws, `created room with id ${newRoomId}`, tokenData.userId);
 }
 
 function joinChatRoom(ws: WebSocket, message: Message) {
@@ -115,7 +121,7 @@ function joinChatRoom(ws: WebSocket, message: Message) {
 function broadcastMessageInChatRoom(
   ws: WebSocket,
   message: Message,
-  tokenData: { user: string },
+  tokenData: TokenData,
 ) {
   const roomId = message.payload.roomId;
 
@@ -128,16 +134,12 @@ function broadcastMessageInChatRoom(
   // broadcast message to all clients joined to room
   chatRoom.forEach((client) => {
     if (client.readyState === client.OPEN) {
-      sendToClient(client, message.payload.content, ` by ${tokenData.user}`);
+      sendToClient(client, message.payload.content, ` by ${tokenData.userId}`);
     }
   });
 }
 
-function leaveChatRoom(
-  ws: WebSocket,
-  message: Message,
-  tokenData: { user: string },
-) {
+function leaveChatRoom(ws: WebSocket, message: Message, tokenData: TokenData) {
   const roomId = message.payload.roomId;
 
   const clients = chatRooms.get(roomId);
@@ -152,7 +154,7 @@ function leaveChatRoom(
   // broadcast leave message to all existing client in chat room
   clients?.forEach((client) => {
     if (client.readyState === client.OPEN) {
-      sendToClient(client, `Room left`, ` by ${tokenData.user}`);
+      sendToClient(client, `Room left`, ` by ${tokenData.username}`);
     }
   });
 }
@@ -169,12 +171,16 @@ function parseRawData(rawData: ws.RawData) {
 
 function authenticateUser(token: string) {
   try {
-    const decodedToken = Buffer.from(token, "base64").toString();
-    console.log("🚀 ~ authenticateUser ~ decodedToken:", decodedToken);
-    const tokenData = JSON.parse(decodedToken);
-    console.log("🚀 ~ authenticateUser ~ tokenData:", tokenData);
+    const JWT_SECRET = process.env.JWT_SECRET!;
 
-    if (!tokenData.user) {
+    const decodedToken = jwt.verify(token, JWT_SECRET) as JwtPayload;
+
+    const tokenData = {
+      userId: decodedToken.userId,
+      username: decodedToken.username,
+    };
+
+    if (!tokenData.userId) {
       throw new Error("Invalid token structure");
     }
 
@@ -187,9 +193,9 @@ function authenticateUser(token: string) {
 
 function extractToken(req: IncomingMessage) {
   const url = parseUrl(req.url!, true);
-  const token = url.query.token;
+  const token = url.query.token as string;
 
-  return token as string;
+  return token;
 }
 
 // function startCounter(ws: WebSocket, count: number) {
