@@ -1,9 +1,14 @@
 import express from "express";
 import http from "http";
 import { startWebsocketServer } from "./websocketServer.ts";
+import routers from "./routes/index.ts";
 
 const app = express();
+app.use(express.json());
+
 const server = http.createServer(app);
+
+app.use("/api", routers);
 
 // start ws server
 startWebsocketServer(server);
