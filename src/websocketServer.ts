@@ -80,7 +80,7 @@ async function handleIncomingMessage(
       break;
 
     case "JOIN":
-      joinChatRoom(ws, message);
+      joinChatRoom(ws, message, tokenData);
       break;
 
     case "MESSAGE":
@@ -138,21 +138,88 @@ async function createChatRoom(ws: WebSocket, tokenData: TokenData) {
   sendToClient(ws, `created room with id ${newChatRoom.id}`, tokenData.userId);
 }
 
-function joinChatRoom(ws: WebSocket, message: Message) {
+async function joinChatRoom(
+  ws: WebSocket,
+  message: Message,
+  tokenData: TokenData,
+) {
   const roomId = message.payload.roomId;
 
-  const chatRoom = chatRooms.get(roomId);
-  if (!chatRoom) {
-    sendToClient(ws, `Room id ${roomId} not exist`);
+  // check room exits in DB
+  const chatRecord = await prisma.chat.findUnique({
+    where: {
+      id: roomId,
+    },
+    select: {
+      id: true,
+      owner: {
+        select: {
+          id: true,
+          username: true,
+        },
+      },
+      chatMembers: {
+        select: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+            },
+          },
+          role: true,
+        },
+      },
+      messages: {
+        select: {
+          id: true,
+          content: true,
+          createdAt: true,
+          sender: {
+            select: {
+              id: true,
+              username: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!chatRecord) {
+    sendToClient(ws, `Room id ${roomId} does not exist`);
     return;
   }
 
-  chatRoom.add(ws);
+  // check if user is already member
+  const isMember = await prisma.chatMembers.findFirst({
+    where: {
+      chatId: roomId,
+      userId: tokenData.userId,
+    },
+  });
 
-  console.log(chalk.bgCyan(chatRoom.size));
+  // add user as MEMBER
+  if (!isMember) {
+    await prisma.chatMembers.create({
+      data: {
+        chatId: roomId,
+        userId: tokenData.userId,
+        role: "MEMBER",
+      },
+    });
+  }
+
+  if (!chatRooms.get(roomId)) {
+    chatRooms.set(roomId, new Set());
+  }
+
+  chatRooms.get(roomId)?.add(ws);
+
+  console.log(`>> Room ${roomId} size: ${chatRooms.get(roomId)!.size}`);
+
+  sendToClient(ws, `Joined room ${roomId}`, tokenData.username);
 }
 
-function broadcastMessageInChatRoom(
+async function broadcastMessageInChatRoom(
   ws: WebSocket,
   message: Message,
   tokenData: TokenData,
@@ -165,11 +232,31 @@ function broadcastMessageInChatRoom(
     return;
   }
 
+  const isMember = await prisma.chatMembers.findFirst({
+    where: {
+      chatId: roomId,
+      userId: tokenData.userId,
+    },
+  });
+  if (!isMember) {
+    sendToClient(ws, "Forbidden : You are not a member in room");
+    return;
+  }
+
   // broadcast message to all clients joined to room
   chatRoom.forEach((client) => {
     if (client.readyState === client.OPEN) {
       sendToClient(client, message.payload.content, ` by ${tokenData.userId}`);
     }
+  });
+
+  // store to db
+  await prisma.message.create({
+    data: {
+      senderId: tokenData.userId,
+      chatId: roomId,
+      content: message.payload.content,
+    },
   });
 }
 
